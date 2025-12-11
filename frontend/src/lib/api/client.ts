@@ -9,6 +9,67 @@ class ApiError extends Error {
 	}
 }
 
+// CSRF token management
+let csrfToken: string | null = null;
+let csrfTokenPromise: Promise<string> | null = null;
+
+async function getCsrfToken(): Promise<string> {
+	// Return cached token if available
+	if (csrfToken) {
+		return csrfToken;
+	}
+
+	// If already fetching, wait for that promise
+	if (csrfTokenPromise) {
+		return csrfTokenPromise;
+	}
+
+	// Fetch new token
+	csrfTokenPromise = fetchCsrfToken();
+	try {
+		csrfToken = await csrfTokenPromise;
+		return csrfToken;
+	} finally {
+		csrfTokenPromise = null;
+	}
+}
+
+async function fetchCsrfToken(): Promise<string> {
+	const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+
+	const headers: HeadersInit = {
+		'Content-Type': 'application/json',
+	};
+
+	if (token) {
+		(headers as any)['Authorization'] = `Bearer ${token}`;
+	}
+
+	const response = await fetch(`${API_URL}/api/v1/csrf-token`, {
+		headers,
+		credentials: 'include',
+	});
+
+	if (!response.ok) {
+		throw new Error('Failed to fetch CSRF token');
+	}
+
+	const data = await response.json();
+	return data.csrf_token;
+}
+
+// Clear CSRF token (call when logging out or when token is rejected)
+export function clearCsrfToken() {
+	csrfToken = null;
+}
+
+// Check if method requires CSRF protection
+function needsCsrfProtection(method?: string): boolean {
+	if (!method) return false;
+	const upperMethod = method.toUpperCase();
+	return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(upperMethod);
+}
+
 async function request<T>(
 	endpoint: string,
 	options: RequestInit = {}
@@ -24,14 +85,29 @@ async function request<T>(
 		(headers as any)['Authorization'] = `Bearer ${token}`;
 	}
 
+	// Add CSRF token for state-changing requests (if authenticated)
+	if (token && needsCsrfProtection(options.method)) {
+		try {
+			const csrf = await getCsrfToken();
+			(headers as any)['X-CSRF-Token'] = csrf;
+		} catch (e) {
+			console.warn('Failed to get CSRF token:', e);
+		}
+	}
+
 	const response = await fetch(`${API_URL}/api/v1${endpoint}`, {
 		...options,
 		headers,
+		credentials: 'include',
 	});
 
 	const data = await response.json();
 
 	if (!response.ok) {
+		// Clear CSRF token if rejected (might be expired)
+		if (response.status === 403 && data.error === 'csrf_invalid') {
+			clearCsrfToken();
+		}
 		throw new ApiError(response.status, data.error || 'unknown', data.message || 'Request failed');
 	}
 
@@ -66,10 +142,13 @@ export const auth = {
 			body: JSON.stringify({ name }),
 		}),
 
-	logout: () =>
-		request<{ message: string }>('/auth/logout', {
+	logout: async () => {
+		const result = await request<{ message: string }>('/auth/logout', {
 			method: 'POST',
-		}),
+		});
+		clearCsrfToken(); // Clear cached CSRF token on logout
+		return result;
+	},
 };
 
 // Bases API
@@ -441,12 +520,20 @@ export const attachments = {
 		const headers: HeadersInit = {};
 		if (token) {
 			headers['Authorization'] = `Bearer ${token}`;
+			// Add CSRF token for file uploads
+			try {
+				const csrf = await getCsrfToken();
+				headers['X-CSRF-Token'] = csrf;
+			} catch (e) {
+				console.warn('Failed to get CSRF token for upload:', e);
+			}
 		}
 
 		const response = await fetch(`${API_URL}/api/v1/records/${recordId}/fields/${fieldId}/attachments`, {
 			method: 'POST',
 			headers,
 			body: formData,
+			credentials: 'include',
 		});
 
 		const data = await response.json();
@@ -570,6 +657,24 @@ export const webhooks = {
 
 	listDeliveries: (id: string) =>
 		request<{ deliveries: WebhookDelivery[] }>(`/webhooks/${id}/deliveries`),
+};
+
+// WebSocket API
+export const websocket = {
+	// Get a short-lived ticket for WebSocket authentication
+	getTicket: (baseId: string) =>
+		request<{ ticket: string }>('/ws/ticket', {
+			method: 'POST',
+			body: JSON.stringify({ base_id: baseId }),
+		}),
+
+	// Get WebSocket URL with ticket (instead of session token)
+	getUrl: async (baseId: string): Promise<string> => {
+		const { ticket } = await websocket.getTicket(baseId);
+		const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		const apiHost = new URL(API_URL).host;
+		return `${wsProtocol}//${apiHost}/ws?baseId=${baseId}&ticket=${encodeURIComponent(ticket)}`;
+	},
 };
 
 export { ApiError };

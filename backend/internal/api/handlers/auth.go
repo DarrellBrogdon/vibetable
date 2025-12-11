@@ -9,15 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vibetable/backend/internal/api/middleware"
 	"github.com/vibetable/backend/internal/models"
 	"github.com/vibetable/backend/internal/store"
 )
 
 const (
-	SessionExpiry        = 7 * 24 * time.Hour // 7 days
-	PasswordResetExpiry  = 1 * time.Hour      // 1 hour
-	MinPasswordLength    = 8
+	SessionExpiry       = 7 * 24 * time.Hour // 7 days
+	PasswordResetExpiry = 1 * time.Hour      // 1 hour
 )
+
+var passwordPolicy = middleware.DefaultPasswordPolicy()
 
 type AuthHandler struct {
 	store *store.AuthStore
@@ -100,12 +102,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Password) < MinPasswordLength {
-		writeError(w, http.StatusBadRequest, "password_too_short", "Password must be at least 8 characters")
-		return
-	}
-
-	// Check if user exists
+	// Check if user exists first
 	existingUser, err := h.store.GetUserByEmail(r.Context(), email)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		log.Printf("Error checking user: %v", err)
@@ -116,7 +113,18 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var user *models.User
 
 	if existingUser == nil {
-		// New user - create account with password
+		// New user - validate password with strong policy before creating account
+		validation := passwordPolicy.ValidatePassword(req.Password)
+		if !validation.Valid {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":   "password_weak",
+				"message": "Password does not meet security requirements",
+				"errors":  validation.Errors,
+			})
+			return
+		}
+
+		// Create account with password
 		user, err = h.store.CreateUserWithPassword(r.Context(), email, req.Password)
 		if err != nil {
 			log.Printf("Error creating user: %v", err)
@@ -229,8 +237,14 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.NewPassword) < MinPasswordLength {
-		writeError(w, http.StatusBadRequest, "password_too_short", "Password must be at least 8 characters")
+	// Validate password with strong policy
+	validation := passwordPolicy.ValidatePassword(req.NewPassword)
+	if !validation.Valid {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":   "password_weak",
+			"message": "Password does not meet security requirements",
+			"errors":  validation.Errors,
+		})
 		return
 	}
 

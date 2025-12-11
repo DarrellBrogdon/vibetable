@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +63,8 @@ func (h *APIKeyHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	apiKey, err := h.apiKeyStore.Create(r.Context(), user.ID, &req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		log.Printf("Error creating API key: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
 	}
 

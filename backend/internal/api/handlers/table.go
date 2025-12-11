@@ -92,6 +92,10 @@ func (h *TableHandler) CreateTable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name_required", "Table name is required")
 		return
 	}
+	if len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "name_too_long", "Table name must be 255 characters or less")
+		return
+	}
 
 	table, err := h.store.CreateTable(r.Context(), baseID, name, user.ID)
 	if err != nil {
@@ -163,6 +167,10 @@ func (h *TableHandler) UpdateTable(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name_required", "Table name is required")
+		return
+	}
+	if len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "name_too_long", "Table name must be 255 characters or less")
 		return
 	}
 

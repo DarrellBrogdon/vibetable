@@ -92,6 +92,10 @@ func (h *FieldHandler) CreateField(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name_required", "Field name is required")
 		return
 	}
+	if len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "name_too_long", "Field name must be 255 characters or less")
+		return
+	}
 
 	fieldType := models.FieldType(req.FieldType)
 	if !models.IsValidFieldType(fieldType) {

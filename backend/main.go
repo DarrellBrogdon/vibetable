@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -69,14 +70,41 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	// Configure CORS from environment
+	allowedOrigins := []string{"http://localhost:5173", "http://localhost:3000"}
+	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
+		allowedOrigins = strings.Split(origins, ",")
+		for i := range allowedOrigins {
+			allowedOrigins[i] = strings.TrimSpace(allowedOrigins[i])
+		}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"Link"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link", "X-CSRF-Token"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Security headers middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Prevent MIME type sniffing
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			// Prevent clickjacking
+			w.Header().Set("X-Frame-Options", "DENY")
+			// XSS protection (legacy but still useful)
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			// Control referrer information
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			// Content Security Policy - allow self and API
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:;")
+			// Permissions Policy (formerly Feature-Policy)
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Routes
 	r.Get("/", handleRoot)
@@ -122,6 +150,29 @@ func main() {
 	fieldStore.SetHub(hub)
 	tableStore.SetHub(hub)
 	viewStore.SetHub(hub)
+
+	// Start background session cleanup job
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ctx := context.Background()
+				if err := authStore.CleanupExpiredSessions(ctx); err != nil {
+					log.Printf("Error cleaning up expired sessions: %v", err)
+				}
+				if err := authStore.CleanupExpiredMagicLinks(ctx); err != nil {
+					log.Printf("Error cleaning up expired magic links: %v", err)
+				}
+				if err := authStore.CleanupExpiredPasswordResetTokens(ctx); err != nil {
+					log.Printf("Error cleaning up expired password reset tokens: %v", err)
+				}
+				log.Println("Session cleanup completed")
+			}
+		}
+	}()
+	log.Println("Session cleanup job started (runs every hour)")
 
 	// Initialize automation engine
 	automationEngine := automation.NewEngine(automationStore, recordStore, fieldStore)
@@ -192,16 +243,32 @@ func main() {
 
 	// Initialize middleware
 	authMiddleware := authmw.NewAuthMiddleware(authStore)
+	csrfMiddleware := authmw.NewCSRFMiddleware()
+	rateLimitMiddleware := authmw.NewRateLimitMiddleware()
 
 	// WebSocket route (outside /api/v1 for simplicity)
 	r.Get("/ws", wsHandler.ServeWS)
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
+		// Apply general rate limiting to all API routes
+		r.Use(rateLimitMiddleware.General)
+
 		r.Get("/health", handleHealth)
 
-		// Auth routes (public)
+		// CSRF token endpoint (GET request, no CSRF needed)
+		r.Get("/csrf-token", csrfMiddleware.TokenHandler)
+
+		// WebSocket ticket endpoint (requires auth, generates short-lived ticket)
+		r.Route("/ws", func(r chi.Router) {
+			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
+			r.Post("/ticket", wsHandler.GetTicket)
+		})
+
+		// Auth routes (public, with stricter rate limiting)
 		r.Route("/auth", func(r chi.Router) {
+			r.Use(rateLimitMiddleware.Auth)
 			r.Post("/login", authHandler.Login)
 			r.Post("/forgot-password", authHandler.ForgotPassword)
 			r.Post("/reset-password", authHandler.ResetPassword)
@@ -209,6 +276,7 @@ func main() {
 			// Protected auth routes
 			r.Group(func(r chi.Router) {
 				r.Use(authMiddleware.Required)
+				r.Use(csrfMiddleware.Protect)
 				r.Get("/me", authHandler.GetMe)
 				r.Patch("/me", authHandler.UpdateMe)
 				r.Post("/logout", authHandler.Logout)
@@ -218,6 +286,7 @@ func main() {
 		// Base routes (all protected)
 		r.Route("/bases", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 
 			r.Get("/", baseHandler.ListBases)
 			r.Post("/", baseHandler.CreateBase)
@@ -255,6 +324,7 @@ func main() {
 		// Table routes (by table ID)
 		r.Route("/tables", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", tableHandler.GetTable)
 			r.Patch("/{id}", tableHandler.UpdateTable)
 			r.Delete("/{id}", tableHandler.DeleteTable)
@@ -296,6 +366,7 @@ func main() {
 		// View routes (by view ID)
 		r.Route("/views", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", viewHandler.GetView)
 			r.Patch("/{id}", viewHandler.UpdateView)
 			r.Delete("/{id}", viewHandler.DeleteView)
@@ -305,6 +376,7 @@ func main() {
 		// Field routes (by field ID)
 		r.Route("/fields", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", fieldHandler.GetField)
 			r.Patch("/{id}", fieldHandler.UpdateField)
 			r.Delete("/{id}", fieldHandler.DeleteField)
@@ -313,6 +385,7 @@ func main() {
 		// Records within a table
 		r.Route("/tables/{tableId}/records", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/", recordHandler.ListRecords)
 			r.Post("/", recordHandler.CreateRecord)
 			r.Post("/bulk", recordHandler.BulkCreateRecords)
@@ -321,6 +394,7 @@ func main() {
 		// Record routes (by record ID)
 		r.Route("/records", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", recordHandler.GetRecord)
 			r.Put("/{id}", recordHandler.UpdateRecord)
 			r.Patch("/{id}", recordHandler.PatchRecord)
@@ -346,6 +420,7 @@ func main() {
 		// Attachment routes (by attachment ID)
 		r.Route("/attachments", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", attachmentHandler.GetAttachment)
 			r.Get("/{id}/download", attachmentHandler.DownloadAttachment)
 			r.Delete("/{id}", attachmentHandler.DeleteAttachment)
@@ -354,6 +429,7 @@ func main() {
 		// Comment routes (by comment ID)
 		r.Route("/comments", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", commentHandler.GetComment)
 			r.Patch("/{id}", commentHandler.UpdateComment)
 			r.Delete("/{id}", commentHandler.DeleteComment)
@@ -363,6 +439,7 @@ func main() {
 		// Form routes (by form ID)
 		r.Route("/forms", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", formHandler.GetForm)
 			r.Patch("/{id}", formHandler.UpdateForm)
 			r.Patch("/{id}/fields", formHandler.UpdateFormFields)
@@ -372,6 +449,7 @@ func main() {
 		// Automation routes (by automation ID)
 		r.Route("/automations", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", automationHandler.GetAutomation)
 			r.Patch("/{id}", automationHandler.UpdateAutomation)
 			r.Delete("/{id}", automationHandler.DeleteAutomation)
@@ -382,6 +460,7 @@ func main() {
 		// API Key routes
 		r.Route("/api-keys", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/", apiKeyHandler.ListAPIKeys)
 			r.Post("/", apiKeyHandler.CreateAPIKey)
 			r.Get("/{id}", apiKeyHandler.GetAPIKey)
@@ -391,20 +470,23 @@ func main() {
 		// Webhook routes (by webhook ID)
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Use(authMiddleware.Required)
+			r.Use(csrfMiddleware.Protect)
 			r.Get("/{id}", webhookHandler.GetWebhook)
 			r.Patch("/{id}", webhookHandler.UpdateWebhook)
 			r.Delete("/{id}", webhookHandler.DeleteWebhook)
 			r.Get("/{id}/deliveries", webhookHandler.ListDeliveries)
 		})
 
-		// Public form routes (no auth required)
+		// Public form routes (no auth required, with rate limiting)
 		r.Route("/public/forms", func(r chi.Router) {
+			r.Use(rateLimitMiddleware.Public)
 			r.Get("/{token}", formHandler.GetPublicForm)
 			r.Post("/{token}", formHandler.SubmitPublicForm)
 		})
 
-		// Public view routes (no auth required)
+		// Public view routes (no auth required, with rate limiting)
 		r.Route("/public/views", func(r chi.Router) {
+			r.Use(rateLimitMiddleware.Public)
 			r.Get("/{token}", viewHandler.GetPublicView)
 		})
 	})

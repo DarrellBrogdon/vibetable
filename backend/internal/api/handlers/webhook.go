@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -98,7 +99,8 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	webhook, err := h.webhookStore.Create(r.Context(), baseID, user.ID, &req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		log.Printf("Error creating webhook: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create webhook")
 		return
 	}
 
@@ -172,7 +174,8 @@ func (h *WebhookHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.webhookStore.Update(r.Context(), id, &req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		log.Printf("Error updating webhook: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update webhook")
 		return
 	}
 

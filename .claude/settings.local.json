@@ -60,7 +60,11 @@
       "Bash(npm run test:coverage:*)",
       "Bash(npm install:*)",
       "Bash(npx vitest run --coverage --coverage.reporter=text --coverage.all)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(openssl rand:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(npm update:*)",
+      "Bash(npm audit fix:*)"
     ],
     "deny": [],
     "ask": []

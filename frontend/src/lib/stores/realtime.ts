@@ -1,7 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-
-const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8080';
-const WS_URL = API_URL.replace(/^http/, 'ws');
+import { websocket as wsApi } from '$lib/api/client';
 
 // Message types from backend
 export const MessageTypes = {
@@ -84,7 +82,7 @@ function createRealtimeStore() {
 		error: null,
 	});
 
-	function connect(baseId: string) {
+	async function connect(baseId: string) {
 		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
 		if (!token) {
 			update((s) => ({ ...s, error: 'No auth token' }));
@@ -96,8 +94,15 @@ function createRealtimeStore() {
 
 		update((s) => ({ ...s, connecting: true, baseId, error: null }));
 
-		const wsUrl = `${WS_URL}/ws?baseId=${baseId}&token=${encodeURIComponent(token)}`;
-		ws = new WebSocket(wsUrl);
+		try {
+			// Get a short-lived ticket for WebSocket authentication
+			const wsUrl = await wsApi.getUrl(baseId);
+			ws = new WebSocket(wsUrl);
+		} catch (err) {
+			console.error('[Realtime] Failed to get WebSocket ticket:', err);
+			update((s) => ({ ...s, connecting: false, error: 'Failed to get WebSocket ticket' }));
+			return;
+		}
 
 		ws.onopen = () => {
 			reconnectAttempts = 0;

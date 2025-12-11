@@ -4,12 +4,11 @@ services:
   db:
     image: postgres:16-alpine
     container_name: vibetable-db
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,12 +16,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - vibetable-network
 
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     container_name: vibetable-backend
+    restart: always
     environment:
       DATABASE_URL: ${DATABASE_URL}
       PORT: ${PORT}
@@ -35,29 +37,31 @@ services:
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE}
       RATE_LIMIT_AUTH_REQUESTS_PER_MINUTE: ${RATE_LIMIT_AUTH_REQUESTS_PER_MINUTE}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: go run main.go
+    networks:
+      - vibetable-network
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
+      args:
+        PUBLIC_API_URL: ${PUBLIC_API_URL}
     container_name: vibetable-frontend
-    environment:
-      PUBLIC_API_URL: ${PUBLIC_API_URL}
+    restart: always
     ports:
-      - "5173:5173"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev -- --host
+    networks:
+      - vibetable-network
 
 volumes:
   postgres_data:
+
+networks:
+  vibetable-network:
+    driver: bridge

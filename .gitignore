@@ -41,3 +41,6 @@ npm-debug.log*
 # Database
 *.sql
 !migrations/*.sql
+
+# Claude Code local settings (contains allowed command patterns)
+.claude/settings.local.json

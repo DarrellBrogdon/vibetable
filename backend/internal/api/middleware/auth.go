@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vibetable/backend/internal/api/handlers"
+	"github.com/vibetable/backend/internal/apicontext"
 	"github.com/vibetable/backend/internal/store"
 )
 
@@ -65,8 +65,8 @@ func (m *AuthMiddleware) Optional(next http.Handler) http.Handler {
 		}
 
 		// Add user and token to context
-		ctx := handlers.SetUserInContext(r.Context(), user)
-		ctx = handlers.SetTokenInContext(ctx, token)
+		ctx := apicontext.SetUserInContext(r.Context(), user)
+		ctx = apicontext.SetTokenInContext(ctx, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -98,8 +98,8 @@ func (m *AuthMiddleware) Required(next http.Handler) http.Handler {
 		}
 
 		// Add user and token to context
-		ctx := handlers.SetUserInContext(r.Context(), user)
-		ctx = handlers.SetTokenInContext(ctx, token)
+		ctx := apicontext.SetUserInContext(r.Context(), user)
+		ctx = apicontext.SetTokenInContext(ctx, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

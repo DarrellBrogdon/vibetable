@@ -82,6 +82,10 @@ func (h *BaseHandler) CreateBase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name_required", "Base name is required")
 		return
 	}
+	if len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "name_too_long", "Base name must be 255 characters or less")
+		return
+	}
 
 	base, err := h.store.CreateBase(r.Context(), name, user.ID)
 	if err != nil {
@@ -145,6 +149,10 @@ func (h *BaseHandler) UpdateBase(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name_required", "Base name is required")
+		return
+	}
+	if len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "name_too_long", "Base name must be 255 characters or less")
 		return
 	}
 
