@@ -13,7 +13,7 @@ COPY . .
 
 # Build argument for API URL
 ARG PUBLIC_API_URL
-ENV PUBLIC_API_URL=$PUBLIC_API_URL
+ENV VITE_PUBLIC_API_URL=$PUBLIC_API_URL
 
 # Build the application
 RUN npm run build

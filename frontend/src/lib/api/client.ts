@@ -1,6 +1,6 @@
 import type { User, Base, Table, Field, Record, RecordColor, BaseCollaborator, View, ViewConfig, ViewType, Form, FormField, PublicForm, PublicView, Comment, Activity, Attachment, Automation, AutomationRun, TriggerType, ActionType, APIKey, APIKeyWithToken, Webhook, WebhookDelivery, WebhookEvent } from '$lib/types';
 
-const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8080';
+const API_URL = import.meta.env.VITE_PUBLIC_API_URL || 'http://localhost:8080';
 
 class ApiError extends Error {
 	constructor(public status: number, public code: string, message: string) {
@@ -260,7 +260,7 @@ export const csv = {
 
 	exportUrl: (tableId: string) => {
 		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
-		const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8080';
+		const API_URL = import.meta.env.VITE_PUBLIC_API_URL || 'http://localhost:8080';
 		return `${API_URL}/api/v1/tables/${tableId}/csv/export?token=${token}`;
 	},
 };

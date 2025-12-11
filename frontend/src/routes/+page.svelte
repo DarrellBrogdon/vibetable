@@ -5,7 +5,7 @@
 	let apiData: { name?: string; version?: string; status?: string } | null = null;
 	let healthData: { status?: string; database?: { status: string } } | null = null;
 
-	const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8080';
+	const API_URL = import.meta.env.VITE_PUBLIC_API_URL || 'http://localhost:8080';
 
 	onMount(async () => {
 		try {
