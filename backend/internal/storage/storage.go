@@ -59,9 +59,9 @@ func GenerateKey(fieldID, recordID uuid.UUID, filename string) string {
 func (s *LocalStorage) Upload(ctx context.Context, key string, data io.Reader, contentType string) error {
 	fullPath := filepath.Join(s.basePath, key)
 
-	// Create directory structure (0750 = owner rwx, group rx, others none)
+	// Create directory structure (0700 = owner rwx only, principle of least privilege)
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 

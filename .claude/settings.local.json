@@ -64,7 +64,8 @@
       "Bash(openssl rand:*)",
       "Bash(docker-compose ps:*)",
       "Bash(npm update:*)",
-      "Bash(npm audit fix:*)"
+      "Bash(npm audit fix:*)",
+      "Bash(go list:*)"
     ],
     "deny": [],
     "ask": []
