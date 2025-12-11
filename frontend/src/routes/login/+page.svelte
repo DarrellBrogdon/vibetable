@@ -41,6 +41,14 @@
 			<h1>VibeTable</h1>
 		</div>
 
+		<div class="experiment-warning">
+			<span class="warning-icon">⚠️</span>
+			<p>
+				<strong>Experimental Project:</strong> This is a coding experiment with no guarantee of data preservation.
+				The site may be taken down at any time.
+			</p>
+		</div>
+
 		<form on:submit|preventDefault={handleSubmit}>
 			<h2>Sign in to your account</h2>
 			<p class="subtitle">Enter your email and password to continue</p>
@@ -224,5 +232,33 @@
 		margin-top: var(--spacing-lg);
 		padding-top: var(--spacing-md);
 		border-top: 1px solid var(--color-border);
+	}
+
+	.experiment-warning {
+		background: #fef3c7;
+		border: 1px solid #f59e0b;
+		border-radius: var(--radius-md);
+		padding: var(--spacing-sm) var(--spacing-md);
+		margin-bottom: var(--spacing-lg);
+		display: flex;
+		align-items: flex-start;
+		gap: var(--spacing-sm);
+	}
+
+	.warning-icon {
+		font-size: var(--font-size-base);
+		flex-shrink: 0;
+		line-height: 1.4;
+	}
+
+	.experiment-warning p {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: #92400e;
+		line-height: 1.4;
+	}
+
+	.experiment-warning strong {
+		color: #78350f;
 	}
 </style>
