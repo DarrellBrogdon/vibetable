@@ -12,12 +12,12 @@ An Airtable clone built with vibe coding — experimenting with AI-assisted deve
 ## Features (Target)
 
 - [x] Project setup
-- [ ] Single base with multiple tables
-- [ ] Grid view with inline editing
-- [ ] Field types: text, number, checkbox, date, single/multi-select
-- [ ] Linked records (relationships between tables)
-- [ ] Filtering and sorting
-- [ ] Kanban view
+- [x] Single base with multiple tables
+- [x] Grid view with inline editing
+- [x] Field types: text, number, checkbox, date, single/multi-select
+- [x] Linked records (relationships between tables)
+- [x] Filtering and sorting
+- [x] Kanban view
 
 ## Getting Started
 
