@@ -137,9 +137,11 @@
 	let selectedRecordIds: Set<string> = new Set();
 	let showBulkColorMenu = false;
 
-	// Cache for linked record titles: Map<tableId, Map<recordId, title>>
-	let linkedRecordCache: Map<string, Map<string, string>> = new Map();
+	// Cache for linked record titles: stored as plain object for Svelte reactivity
+	// Structure: { [tableId]: { [recordId]: title } }
+	let linkedRecordTitles: { [tableId: string]: { [recordId: string]: string } } = {};
 	let loadingLinkedRecords = false;
+	let linkedCacheVersion = 0; // Increment to force re-render
 
 	// Tables available for linking (exclude current table)
 	$: linkableTables = tables.filter(t => t.id !== currentTableId);
@@ -158,16 +160,22 @@
 
 		try {
 			// Find all unique table IDs we need to fetch
-			const tableIdsToFetch = new Set<string>();
+			const tableIdsToFetch: string[] = [];
 			for (const field of linkedRecordFields) {
 				const tableId = field.options?.linked_table_id;
-				if (tableId && !linkedRecordCache.has(tableId)) {
-					tableIdsToFetch.add(tableId);
+				if (tableId && !linkedRecordTitles[tableId]) {
+					tableIdsToFetch.push(tableId);
 				}
 			}
 
+			if (tableIdsToFetch.length === 0) {
+				return;
+			}
+
 			// Fetch records for each linked table
-			for (const tableId of tableIdsToFetch) {
+			const newTitles: { [tableId: string]: { [recordId: string]: string } } = {};
+
+			await Promise.all(tableIdsToFetch.map(async (tableId) => {
 				try {
 					const [fieldsResult, recordsResult] = await Promise.all([
 						fieldsApi.list(tableId),
@@ -175,22 +183,24 @@
 					]);
 
 					// Find the primary field (first text field, or first field)
-					const primaryField = fieldsResult.fields.find(f => f.field_type === 'text') || fieldsResult.fields[0];
+					const primaryField = fieldsResult.fields.find((f: Field) => f.field_type === 'text') || fieldsResult.fields[0];
 
 					// Build the cache for this table
-					const titleMap = new Map<string, string>();
+					const titleMap: { [recordId: string]: string } = {};
 					for (const record of recordsResult.records) {
 						const title = primaryField ? (record.values[primaryField.id] || 'Untitled') : 'Untitled';
-						titleMap.set(record.id, String(title));
+						titleMap[record.id] = String(title);
 					}
-					linkedRecordCache.set(tableId, titleMap);
+					newTitles[tableId] = titleMap;
 				} catch (e) {
 					console.error(`Failed to load linked records for table ${tableId}:`, e);
+					newTitles[tableId] = {}; // Empty object to prevent retrying
 				}
-			}
+			}));
 
-			// Force Svelte reactivity
-			linkedRecordCache = linkedRecordCache;
+			// Update cache with new data - create new object for reactivity
+			linkedRecordTitles = { ...linkedRecordTitles, ...newTitles };
+			linkedCacheVersion += 1;
 		} finally {
 			loadingLinkedRecords = false;
 		}
@@ -785,7 +795,8 @@
 		pickerSelectedIds = [];
 	}
 
-	function getLinkedRecordTitles(value: any, field: Field): { id: string; title: string }[] {
+	function getLinkedRecordTitles(value: any, field: Field, _version?: number): { id: string; title: string }[] {
+		// The _version param ensures Svelte tracks reactivity when cache updates
 		if (!value || !Array.isArray(value) || value.length === 0) {
 			return [];
 		}
@@ -793,20 +804,20 @@
 		const tableId = field.options?.linked_table_id;
 		if (!tableId) return [];
 
-		const titleMap = linkedRecordCache.get(tableId);
+		const titleMap = linkedRecordTitles[tableId];
 		if (!titleMap) {
-			// Cache not loaded yet, return IDs
+			// Cache not loaded yet
 			return value.map((id: string) => ({ id, title: 'Loading...' }));
 		}
 
 		return value.map((id: string) => ({
 			id,
-			title: titleMap.get(id) || 'Unknown'
+			title: titleMap[id] || 'Unknown'
 		}));
 	}
 
-	function getLinkedRecordDisplay(value: any, field: Field): string {
-		const titles = getLinkedRecordTitles(value, field);
+	function getLinkedRecordDisplay(value: any, field: Field, _version?: number): string {
+		const titles = getLinkedRecordTitles(value, field, _version);
 		if (titles.length === 0) return '';
 		if (titles.length <= 2) {
 			return titles.map(t => t.title).join(', ');
@@ -1832,7 +1843,7 @@
 									{record.values[field.id] ? '✓' : ''}
 								</span>
 							{:else if field.field_type === 'linked_record'}
-								{@const linkedTitles = getLinkedRecordTitles(record.values[field.id], field)}
+								{@const linkedTitles = getLinkedRecordTitles(record.values[field.id], field, linkedCacheVersion)}
 								<span class="linked-value">
 									{#if linkedTitles.length === 0}
 										<span class="linked-placeholder">Click to link records</span>

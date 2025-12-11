@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import type { Field, Record, SelectOption } from '$lib/types';
+	import { fields as fieldsApi, records as recordsApi } from '$lib/api/client';
 
 	export let fields: Field[] = [];
 	export let records: Record[] = [];
@@ -17,6 +18,78 @@
 	// Column rename state
 	let editingColumnId: string | null = null;
 	let editingColumnName: string = '';
+
+	// Cache for linked record titles
+	let linkedRecordTitles: { [tableId: string]: { [recordId: string]: string } } = {};
+	let loadingLinkedRecords = false;
+	let linkedCacheVersion = 0;
+
+	// Get linked record fields
+	$: linkedRecordFields = fields.filter(f => f.field_type === 'linked_record' && f.options?.linked_table_id);
+
+	// Load linked record titles when fields or records change
+	$: if (linkedRecordFields.length > 0 && records.length > 0) {
+		loadLinkedRecordTitles();
+	}
+
+	async function loadLinkedRecordTitles() {
+		if (loadingLinkedRecords) return;
+		loadingLinkedRecords = true;
+
+		try {
+			const tableIdsToFetch: string[] = [];
+			for (const field of linkedRecordFields) {
+				const tableId = field.options?.linked_table_id;
+				if (tableId && !linkedRecordTitles[tableId]) {
+					tableIdsToFetch.push(tableId);
+				}
+			}
+
+			if (tableIdsToFetch.length === 0) return;
+
+			const newTitles: { [tableId: string]: { [recordId: string]: string } } = {};
+
+			await Promise.all(tableIdsToFetch.map(async (tableId) => {
+				try {
+					const [fieldsResult, recordsResult] = await Promise.all([
+						fieldsApi.list(tableId),
+						recordsApi.list(tableId)
+					]);
+
+					const primaryField = fieldsResult.fields.find((f: Field) => f.field_type === 'text') || fieldsResult.fields[0];
+
+					const titleMap: { [recordId: string]: string } = {};
+					for (const record of recordsResult.records) {
+						const title = primaryField ? (record.values[primaryField.id] || 'Untitled') : 'Untitled';
+						titleMap[record.id] = String(title);
+					}
+					newTitles[tableId] = titleMap;
+				} catch (e) {
+					console.error(`Failed to load linked records for table ${tableId}:`, e);
+					newTitles[tableId] = {};
+				}
+			}));
+
+			linkedRecordTitles = { ...linkedRecordTitles, ...newTitles };
+			linkedCacheVersion += 1;
+		} finally {
+			loadingLinkedRecords = false;
+		}
+	}
+
+	function getLinkedRecordDisplay(value: any, field: Field): string {
+		if (!value || !Array.isArray(value) || value.length === 0) return '';
+
+		const tableId = field.options?.linked_table_id;
+		if (!tableId) return '';
+
+		const titleMap = linkedRecordTitles[tableId];
+		if (!titleMap) return 'Loading...';
+
+		const titles = value.map((id: string) => titleMap[id] || 'Unknown');
+		if (titles.length <= 2) return titles.join(', ');
+		return `${titles[0]}, +${titles.length - 1} more`;
+	}
 
 	// Find single_select fields that can be used for grouping
 	$: selectFields = fields.filter(f => f.field_type === 'single_select');
@@ -106,7 +179,7 @@
 		return preview;
 	}
 
-	function formatPreviewValue(field: Field, value: any): string {
+	function formatPreviewValue(field: Field, value: any, _cacheVersion?: number): string {
 		switch (field.field_type) {
 			case 'checkbox':
 				return value ? '✓' : '✗';
@@ -114,6 +187,17 @@
 				return new Date(value).toLocaleDateString();
 			case 'number':
 				return String(value);
+			case 'linked_record':
+				return getLinkedRecordDisplay(value, field);
+			case 'single_select':
+				const option = field.options?.options?.find((o: SelectOption) => o.id === value);
+				return option?.name || String(value);
+			case 'multi_select':
+				if (!Array.isArray(value)) return '';
+				return value.map((id: string) => {
+					const opt = field.options?.options?.find((o: SelectOption) => o.id === id);
+					return opt?.name || id;
+				}).join(', ');
 			default:
 				return String(value).substring(0, 50);
 		}
@@ -325,7 +409,7 @@
 								{#each getRecordPreview(record) as preview}
 									<div class="card-field">
 										<span class="field-name">{preview.field.name}:</span>
-										<span class="field-value">{formatPreviewValue(preview.field, preview.value)}</span>
+										<span class="field-value">{formatPreviewValue(preview.field, preview.value, linkedCacheVersion)}</span>
 									</div>
 								{/each}
 							</div>
