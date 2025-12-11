@@ -39,8 +39,7 @@ npm-debug.log*
 .docker/
 
 # Database
-*.sql
-!migrations/*.sql
+# Note: migration SQL files are in backend/internal/migrate/sql/ and must be tracked
 
 # Claude Code local settings (contains allowed command patterns)
 .claude/settings.local.json
